@@ -12,6 +12,12 @@
     "url": "https://github.com/CoderSyndicate/nodejs-graceful-shutdown/issues"
   },
   "homepage": "https://github.com/CoderSyndicate/nodejs-graceful-shutdown",
+  "keywords": [
+    "graceful",
+    "shutdown",
+    "finalizer",
+    "sigterm"
+  ],
   "scripts": {
     "test": "./node_modules/.bin/mocha ./test --exit"
   },
