@@ -1,0 +1,26 @@
+{
+  "name": "@codersyndicate/graceful-shutdown",
+  "version": "1.0.0",
+  "description": "Module that listens on posix signals and gracefully shutdowns the given server",
+  "main": "index.js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CoderSyndicate/nodejs-graceful-shutdown"
+  },
+  "bugs": {
+    "url": "https://github.com/CoderSyndicate/nodejs-graceful-shutdown/issues"
+  },
+  "homepage": "https://github.com/CoderSyndicate/nodejs-graceful-shutdown",
+  "scripts": {
+    "test": "./node_modules/.bin/mocha ./test --exit"
+  },
+  "dependencies": {
+    "async": "^3.2.0",
+    "http-shutdown": "^1.2.2"
+  },
+  "devDependencies": {
+    "chai": "^4.3.4",
+    "mocha": "^9.0.1"
+  }
+}
