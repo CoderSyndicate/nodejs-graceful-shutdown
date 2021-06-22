@@ -1,4 +1,4 @@
-graceful-astalavista
+graceful-shutdown
 ====
 
 ## Concept
@@ -9,11 +9,17 @@ In Kubernetes a Service Pod can be killed any time due to scaling or any other a
 the service process must be able to support the [Kubernetes Pod Lifecycle](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/) by providing 2 probe routes: liveness and readiness
 
 - `liveness` only refects that the process exists, is stable and is accessible
-- `readiness` shows that the service dependecies (DB, ...) are available and is ready to process requests
+- `readiness` shows that the service dependencies (DB, ...) are available and is ready to process requests
 
 While `READY` a pod will be in the service pod pool to which the traffic is directed and will receive requests to process,
 on the other hand while `NOT-READY` it will leave the pool, receive no new traffic and have a grace periode to finish processing
-pending responses and release used ressources (DB connections, ...) before been shut down
+pending responses and release used resources (DB connections, ...) before been shut down
+
+## Features
+
+- is applied to the [net.Server](https://nodejs.org/dist/latest-v16.x/docs/api/net.html#net_class_net_server) instance
+- allows using Finalizer functions to be executed before shutdown (sending metrics for example)
+
 
 ## Flowchart
 
@@ -32,6 +38,13 @@ all service dependencies are available (DB connections, ...), `503` and `NOT-REA
 
 - `gracePeriodMilliseconds`: grace period in milliseconds, must be longer than the average processing time (default: 5000)
 - `finalizers`: an array of functions, taking "server" and "callback" as arguments, to be executed on shutdown. 
+
+## Knowledge
+
+- https://blog.laputa.io/graceful-shutdown-in-kubernetes-85f1c8d586da
+- https://blog.risingstack.com/graceful-shutdown-node-js-kubernetes/
+- https://cloud.google.com/blog/products/containers-kubernetes/kubernetes-best-practices-terminating-with-grace
+- https://expressjs.com/en/advanced/healthcheck-graceful-shutdown.html
 
 ## Usage
 
