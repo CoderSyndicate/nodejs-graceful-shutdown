@@ -1,5 +1,7 @@
 'use strict';
 
+const async = require('async');
+
 const log = require('./lib/log');
 const ServerKiller = require('./lib/server-shutdown');
 
@@ -10,6 +12,8 @@ const environmentGracePeriodMilliseconds = (process.env.SERVER_SHUTDOWN_GRACE_PE
 
 
 let terminatedBy;
+let readinessCheckTasks;
+let isReady = false;
 
 
 class ServerGracefulShutdown {
@@ -17,7 +21,7 @@ class ServerGracefulShutdown {
     /**
      *
      * @param {net.Server}  server
-     * @param {{ signals, gracePeriodMilliseconds, finalizers, delay, killer}} options
+     * @param {{ signals, gracePeriodMilliseconds, readinessChecks, finalizers, delay, killer}} options
      */
     constructor(server, options) {
         options = options || {};
@@ -27,52 +31,112 @@ class ServerGracefulShutdown {
         /** {net.Server} */
         this.server = server;
 
-        /** @type {number} delay in milliseconds allowing kubernetes to take service from out of the routing table */
+        /** @type {Number} delay in milliseconds allowing kubernetes to take service from out of the routing table */
         this.gracePeriodMilliseconds = options.gracePeriodMilliseconds;
 
-        /** @type {number} delay in milliseconds before starting the graceful shutdown sequence */
+        /** @type {Number} delay in milliseconds before starting the graceful shutdown sequence */
         this.delay = options.delay;
 
         /** @type {ServerKiller} delay in milliseconds before starting the graceful shutdown sequence */
         this.killer = options.killer;
 
-        /** @type {function[]} functions to be executed at the end of the graceful sequence */
+        /** @type {Function[]} functions to be executed at the end of the graceful sequence */
         this.shutdownFinalizers = [];
 
-        // register finalizers provided per option
+        /** @type {Function[]} functions to be executed at startup to check the readiness */
+        this.readinessChecks = [];
+
+        // register shutdown finalizers provided per option
         options.finalizers.forEach(this.addFinalizer.bind(this));
+
+        // register readiness checks provided per option
+        options.readinessChecks.forEach(this.addReadinessCheck.bind(this));
     }
 
-    /**
-     *
-     * @param {function} fn function to be executed on shutdown taking "server" and "callback" arguments and returning an error or undefined
-     */
-    addFinalizer(fn) {
-        if (typeof fn !== 'function') {
-            throw new TypeError('a finalizer has to be a function with "server" and "callback" arguments');
-        }
+    liveliness(request, response) {
+        response.send(200,'OK');
+    }
 
-        if (fn.name === '' || fn.name === undefined) {
-            throw new TypeError('a finalizer has to be a named function');
-        }
-
-        let hasADuplicate = this.shutdownFinalizers.some(finalizer => fn.name === finalizer.name);
-
-        if (hasADuplicate === true) {
-            log.info('finalizer name "' + fn.name + '" already registered - ignoring finalizer');
+    readiness(request, response) {
+        if (isReady) {
+            // only run readiness checks at startup
+            request.send(200, 'READY');
             return;
         }
 
-        this.shutdownFinalizers.push(fn);
+        if (isTerminated()) {
+            // service has been terminated by an external signal
+            // this condition is mandatory
+            request.send(503, 'NOT-READY');
+            return;
+        }
+
+        this.checkReadiness((error) => {
+            if (error !== undefined) {
+                response.send(503, 'NOT-READY');
+                return;
+            }
+
+            request.send(200, 'READY');
+        });
+    }
+
+    checkReadiness(callback) {
+        if (readinessCheckTasks === undefined) {
+            readinessCheckTasks = this.readinessChecks.map(check => {
+                return function (cb) {
+                    log.info('running readiness check "' + check.name + '"')
+                    check(cb);
+                };
+            });
+        }
+
+        log.info('server start up: readiness checks all executed');
+        async.parallel(readinessCheckTasks, (error) => {
+            if (error !== null && error !== undefined) {
+                log.info('server start up: readiness checks failed with error: ' + error.stack || error);
+                callback(error);
+                return;
+            }
+
+            log.info('server start up: readiness checks all executed');
+            isReady = true;
+            callback();
+        });
     }
 
     /**
      *
-     * @returns {function[]} returns registered finalizer functions
+     * @param {Function} fn function to be executed on shutdown taking "server" and "callback" arguments and returning an error or undefined
+     */
+    addFinalizer(fn) {
+        addFunction(fn, this.shutdownFinalizers);
+    }
+
+    /**
+     *
+     * @returns {Function[]} returns registered finalizer functions
      */
     listFinalizers() {
         // return a copy of the finalizer array
         return [].concat(this.shutdownFinalizers);
+    }
+
+    /**
+     *
+     * @param {Function} fn function to be executed on startup taking "server" and "callback" arguments and returning an error or undefined
+     */
+    addReadinessCheck(fn) {
+        addFunction(fn, this.readinessChecks);
+    }
+
+    /**
+     *
+     * @returns {Function[]} returns registered check functions
+     */
+    listChecks() {
+        // return a copy of the readiness check array
+        return [].concat(this.readinessChecks);
     }
 
     terminate(signal, callback) {
@@ -81,7 +145,7 @@ class ServerGracefulShutdown {
 
     /**
      *
-     * @param {{ signals, gracePeriodMilliseconds, finalizers, delay, killer}} options
+     * @param {{ signals, gracePeriodMilliseconds, readinessChecks, finalizers, delay, killer}} options
      */
     static ensureOptions(options) {
 
@@ -101,7 +165,15 @@ class ServerGracefulShutdown {
         }
 
         if (options.finalizers.constructor !== Array) {
-            throw new TypeError('finalizers options has to be an array');
+            throw new TypeError('finalizers options has to be an array of Functions');
+        }
+
+        if (options.readinessChecks === undefined) {
+            options.readinessChecks = [];
+        }
+
+        if (options.readinessChecks.constructor !== Array) {
+            throw new TypeError('readinessChecks options has to be an array of Functions');
         }
 
         if (options.killer === undefined) {
@@ -115,6 +187,30 @@ class ServerGracefulShutdown {
         }
 
     }
+}
+
+/**
+ *
+ * @param {Function} fn
+ * @param {Function[]} collection
+ */
+function addFunction(fn, collection) {
+    if (typeof fn !== 'function') {
+        throw new TypeError('provided function has to have "server" and "callback" arguments');
+    }
+
+    if (fn.name === '' || fn.name === undefined) {
+        throw new TypeError('provided function has to be a named function');
+    }
+
+    let hasADuplicate = collection.some(finalizer => fn.name === finalizer.name);
+
+    if (hasADuplicate === true) {
+        log.info('provided function "' + fn.name + '" already registered - ignoring it');
+        return;
+    }
+
+    collection.push(fn);
 }
 
 /**

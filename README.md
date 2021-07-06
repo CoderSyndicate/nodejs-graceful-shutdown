@@ -17,8 +17,19 @@ pending responses and release used resources (DB connections, ...) before been s
 
 ## Features
 
-- is applied to the [net.Server](https://nodejs.org/dist/latest-v16.x/docs/api/net.html#net_class_net_server) instance
-- allows using Finalizer functions to be executed before shutdown (sending metrics for example)
+### Multi Framework Support
+
+The graceful shutdown logic is applied to the [net.Server](https://nodejs.org/dist/latest-v16.x/docs/api/net.html#net_class_net_server) object,
+which means that all service frameworks should be supported.
+
+### Startup Readiness Checks
+
+Function list that is used by the readiness route to assess if start conditions are met.
+
+### Shutdown Finalizers
+
+Function list that has to be executed in parallel on shutdown.
+As an example, you may want to push your metrics before shutdown in order to avoid metric gaps.
 
 
 ## Flowchart
@@ -60,11 +71,38 @@ const options = {
             callback();
         },
     ],
+    readinessChecks: [
+        function checkDBReadiness(server, callback) {
+            if (ready) {
+                callback();
+                return;
+            }
+            
+            callback(new Error('DB not reachable'));
+        }
+    ],
 }
 
 // astalavista returns a ServerGracefulShutdown instance
 let graceful = astalavista.enable(server, options);
 
+server.use('/health', graceful.liveliness);
+
+// add a finalizer after initialisation
+graceful.addFinalizer(function doSomethingEvenBetter(server, callback) {
+  console.log('i shall return! (famous last words)')
+  callback();
+});
+
+```
+
+you have two possibilities to implement the readiness route
+
+```javascript
+// use existing readiness check handler
+server.use('/health/readiness', graceful.readiness);
+
+// use a custom readiness check handler
 server.use('/health/readiness', (req, res) => {
     if (astalavista.isTerminated()) {
         // service has been terminated by an external signal
@@ -72,25 +110,14 @@ server.use('/health/readiness', (req, res) => {
         return res.send(503, 'NOT-READY');
     }
 
-    /* optional block: service may have no dependencies */
-    if (!someDBLib.connected) {
-        // DB dependency is not satisfied
-        // service can not work properly
-        return res.send(503, 'NOT-READY');
-    }
-    /* optional block */
+    graceful.checkReadiness((error) => {
+        if (error !== undefined) {
+            response.send(503, 'NOT-READY');
+            return;
+        }
 
-    res.send(200, 'READY');
-});
-
-server.use('/health', (req, res) => {
-    res.send(200,'OK');
-});
-
-// add a finalizer after initialisation
-graceful.addFinalizer(function doSomethingEvenBetter(server, callback) {
-  console.log('i shall return! (famous last words)')
-  callback();
+        request.send(200, 'READY');
+    });
 });
 
 ```
