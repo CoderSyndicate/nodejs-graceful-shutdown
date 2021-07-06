@@ -120,4 +120,10 @@ server.use('/health/readiness', (req, res) => {
     });
 });
 
+// add a readiness check after initialisation
+graceful.addReadinessCheck(function checkSomethingElse(callback) {
+    console.log('does it work?')
+    callback();
+});
+
 ```
