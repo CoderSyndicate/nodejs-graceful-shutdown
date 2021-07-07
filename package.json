@@ -1,6 +1,6 @@
 {
   "name": "@codersyndicate/graceful-shutdown",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Module that listens on posix signals and gracefully shutdowns the given server",
   "main": "index.js",
   "license": "MIT",
