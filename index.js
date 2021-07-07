@@ -13,6 +13,7 @@ const environmentGracePeriodMilliseconds = (process.env.SERVER_SHUTDOWN_GRACE_PE
 
 let terminatedBy;
 let readinessCheckTasks;
+let checkingReadiness = false;
 let isReady = false;
 
 
@@ -58,13 +59,13 @@ class ServerGracefulShutdown {
     }
 
     readiness(request, response) {
-        if (isReady) {
+        if (isReady === true) {
             // only run readiness checks at startup
             request.send(200, 'READY');
             return;
         }
 
-        if (isTerminated()) {
+        if (isTerminated() === true) {
             // service has been terminated by an external signal
             // this condition is mandatory
             request.send(503, 'NOT-READY');
@@ -82,6 +83,13 @@ class ServerGracefulShutdown {
     }
 
     checkReadiness(callback) {
+        if (checkingReadiness === true) {
+            callback(new Error('already checking readiness'));
+            return;
+        }
+
+        checkingReadiness = true;
+
         if (readinessCheckTasks === undefined) {
             readinessCheckTasks = this.readinessChecks.map(check => {
                 return function (cb) {
@@ -93,6 +101,8 @@ class ServerGracefulShutdown {
 
         log.info('server start up: readiness checks all executed');
         async.parallel(readinessCheckTasks, (error) => {
+            checkingReadiness = false;
+
             if (error !== null && error !== undefined) {
                 log.info('server start up: readiness checks failed with error: ' + error.stack || error);
                 callback(error);
@@ -252,7 +262,7 @@ function enable(server, options, gracefulShutdown) {
 
     options.signals.forEach(function (signal) {
         process.on(signal, function () {
-            if (isTerminated()) {
+            if (isTerminated() === true) {
                 log.info('force exit');
                 process.exit(128 + 1);
             }
