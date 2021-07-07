@@ -38,7 +38,7 @@ As an example, you may want to push your metrics before shutdown in order to avo
 
 ### Liveness
 
-a route `/heath` returning a Response Status `200` and Body `OK` as soon as the service port is open
+a route `/health` returning a Response Status `200` and Body `OK` as soon as the service port is open
 
 ### Readiness
 
